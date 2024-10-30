@@ -1,10 +1,16 @@
-﻿using WebSocketServer.MessageHandlers;
+﻿using Microsoft.Extensions.DependencyInjection;
+using WebSocketServer.MessageHandlers;
 
-(string host, int port) = ReadConnection();
+var serviceProvider = new ServiceCollection()
+            .AddSingleton<MessageHandler>()
+            .AddSingleton<WebSocketServer.WebSocketServer.WebSocketServer>(provider =>
+            {
+                var (host, port) = ReadConnection();
+                return new WebSocketServer.WebSocketServer.WebSocketServer($"http://{host}:{port}/", provider.GetRequiredService<MessageHandler>());
+            })
+            .BuildServiceProvider();
 
-var messageHandler = new MessageHandler();
-var server = new WebSocketServer.WebSocketServer.WebSocketServer($"http://{host}:{port}/", messageHandler);
-
+var server = serviceProvider.GetRequiredService<WebSocketServer.WebSocketServer.WebSocketServer>();
 server.Start();
 
 Console.WriteLine("Press Enter to stop the server...");
