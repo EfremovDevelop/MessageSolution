@@ -8,11 +8,14 @@ namespace WebSocketClient.WebSocketClient
     {
         private readonly string _serverUri;
         private ClientWebSocket _webSocket;
+        private CancellationTokenSource _cancellationTokenSource;
+        private const int PingInterval = 10000;
 
         public WebSocketClient(string serverUri)
         {
             _serverUri = serverUri;
             _webSocket = new ClientWebSocket();
+            _cancellationTokenSource = new CancellationTokenSource();
         }
 
         public async Task ConnectAsync()
@@ -24,13 +27,32 @@ namespace WebSocketClient.WebSocketClient
                     Console.WriteLine("Attempting to connect to the server...");
                     await _webSocket.ConnectAsync(new Uri(_serverUri), CancellationToken.None);
                     Console.WriteLine("Connected to the server.");
-                    ReceiveMessagesAsync();
+                    _ = StartPingAsync();
+                    _ = ReceiveMessagesAsync();
                 }
                 catch (Exception ex)
                 {
                     _webSocket = new ClientWebSocket();
                     Console.WriteLine($"Connection failed: {ex.Message}. Retrying in 5 seconds...");
                     await Task.Delay(5000);
+                }
+            }
+        }
+
+        private async Task StartPingAsync()
+        {
+            while (_webSocket.State == WebSocketState.Open)
+            {
+                try
+                {
+                    await _webSocket.SendAsync(ArraySegment<byte>.Empty, WebSocketMessageType.Text, true, CancellationToken.None);
+                    await Task.Delay(PingInterval, _cancellationTokenSource.Token);
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"Ping failed: {ex.Message}");
+                    await ReconnectAsync();
+                    break;
                 }
             }
         }
@@ -52,7 +74,10 @@ namespace WebSocketClient.WebSocketClient
                     }
 
                     var message = Encoding.UTF8.GetString(buffer, 0, result.Count);
-                    Console.WriteLine($"Message from server: {message}");
+                    if (message == string.Empty)
+                        Console.WriteLine($"ping: {message}");
+                    else
+                        Console.WriteLine($"Message from server: {message}");
                 }
                 catch (Exception ex)
                 {
@@ -79,8 +104,10 @@ namespace WebSocketClient.WebSocketClient
         private async Task ReconnectAsync()
         {
             Console.WriteLine("Reconnecting to server...");
+            _cancellationTokenSource.Cancel();
             _webSocket.Dispose();
             _webSocket = new ClientWebSocket();
+            _cancellationTokenSource = new CancellationTokenSource();
             await ConnectAsync();
         }
     }

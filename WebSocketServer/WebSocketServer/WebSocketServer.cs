@@ -10,7 +10,7 @@ namespace WebSocketServer.WebSocketServer
     {
         private readonly HttpListener _listener;
         private readonly IMessageHandler _messageHandler;
-        private readonly ConcurrentBag<WebSocket> _clients = new ConcurrentBag<WebSocket>();
+        private readonly ConcurrentDictionary<WebSocket, bool> _clients = new ConcurrentDictionary<WebSocket, bool>();
 
         public WebSocketServer(string uri, IMessageHandler messageHandler)
         {
@@ -55,7 +55,7 @@ namespace WebSocketServer.WebSocketServer
         {
             var webSocketContext = await context.AcceptWebSocketAsync(null);
             var webSocket = webSocketContext.WebSocket;
-            _clients.Add(webSocket);
+            _clients.TryAdd(webSocket, true);
 
             var buffer = new byte[1024];
             Console.WriteLine("New client connected.");
@@ -72,22 +72,29 @@ namespace WebSocketServer.WebSocketServer
                         break;
                     }
 
-                    // Broadcast message to all clients
                     string message = Encoding.UTF8.GetString(buffer, 0, result.Count);
-                    var processedMessage = await _messageHandler.HandleMessageAsync(message);
-                    await BroadcastMessageAsync(processedMessage);
+                    if (message == string.Empty) // pong
+                    {
+                        await webSocket.SendAsync(ArraySegment<byte>.Empty, WebSocketMessageType.Text, true, CancellationToken.None);
+                    }
+                    else
+                    {
+                        // Broadcast message to all clients
+                        var processedMessage = await _messageHandler.HandleMessageAsync(message);
+                        await BroadcastMessageAsync(processedMessage);
+                    }
                 }
             }
             finally
             {
-                _clients.TryTake(out _);
+                _clients.TryRemove(webSocket, out _);
             }
         }
         private async Task BroadcastMessageAsync(string message)
         {
             var buffer = Encoding.UTF8.GetBytes(message);
 
-            foreach (var client in _clients)
+            foreach (var client in _clients.Keys)
             {
                 if (client.State == WebSocketState.Open)
                 {
